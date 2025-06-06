@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Bedrock Translation App</title>
+    <!-- 确保jQuery在最前面加载 -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .translation-container {
+            display: flex;
+            margin-top: 20px;
+        }
+        .translation-column {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            margin: 0 5px;
+        }
+        .settings-panel {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .tab-content {
+            padding-top: 20px;
+        }
+        .star-rating {
+            font-size: 24px;
+            color: #ffc107;
+            cursor: pointer;
+        }
+        .fa-star, .fa-star-o {
+            margin-right: 5px;
+        }
+        .insights-list {
+            padding-left: 20px;
+        }
+        .insights-list li {
+            margin-bottom: 8px;
+        }
+        #progress-container {
+            margin-top: 20px;
+        }
+    </style>
+    <script>
+    // 页面加载完成后执行
+    $(document).ready(function() {
+        console.log("文档已加载，准备绑定事件");
+        
+        // 直接绑定点击事件到星星元素
+        $(".rating-star").click(function() {
+            console.log("星星被点击");
+            var rating = $(this).data("rating");
+            console.log("评分: " + rating);
+            
+            // 更新星星显示
+            $(".rating-star").removeClass("fa-star").addClass("fa-star-o");
+            for (var i = 1; i <= rating; i++) {
+                $(".rating-star[data-rating='" + i + "']").removeClass("fa-star-o").addClass("fa-star");
+            }
+            
+            // 更新文本和启用提交按钮
+            $("#rating-text").text(rating + "/5 星");
+            $("#submit-rating").prop("disabled", false).data("rating", rating);
+        });
+        
+        // 绑定提交按钮点击事件
+        $("#submit-rating").click(function() {
+            console.log("提交按钮被点击");
+            var rating = $(this).data("rating");
+            
+            // 获取翻译数据
+            var sourceText = $("#original-text").text();
+            var translatedText = $("#translated-text").text();
+            var sourceLanguage = $("#source_language").val();
+            var targetLanguage = $("#target_language").val();
+            var modelId = $("#model_id").val();
+            
+            // 准备评分数据
+            var ratingData = {
+                source_text: sourceText,
+                translated_text: translatedText,
+                source_language: sourceLanguage,
+                target_language: targetLanguage,
+                model_id: modelId,
+                rating: rating
+            };
+            
+            // 提交评分
+            $.ajax({
+                url: "/submit_rating",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify(ratingData),
+                success: function(response) {
+                    alert("评分提交成功，谢谢您的反馈！");
+                    
+                    // 重置评分界面
+                    $(".rating-star").removeClass("fa-star").addClass("fa-star-o");
+                    $("#rating-text").text("请选择评分");
+                    $("#submit-rating").prop("disabled", true);
+                    
+                    // 刷新统计
+                    loadRatingStats();
+                },
+                error: function(xhr) {
+                    alert("评分提交失败: " + (xhr.responseJSON ? xhr.responseJSON.error : "未知错误"));
+                }
+            });
+        });
+        
+        // 加载评分统计
+        function loadRatingStats() {
+            try {
+                const granularity = $('#stats-granularity').val() || 'day';
+                
+                $.ajax({
+                    url: `/rating_stats?granularity=${granularity}`,
+                    type: 'GET',
+                    success: function(data) {
+                        // Render charts if functions exist
+                        if (typeof renderTrendChart === 'function') {
+                            renderTrendChart(data.time_series, granularity);
+                            renderDistributionChart(data.rating_distribution);
+                            renderLanguagePairChart(data.language_pairs);
+                            renderModelChart(data.models);
+                            renderInsights(data.insights);
+                        }
+                    },
+                    error: function(xhr) {
+                        console.error('Failed to load rating stats:', xhr);
+                    }
+                });
+            } catch (e) {
+                console.error("Error loading stats:", e);
+            }
+        }
+        
+        // 刷新统计按钮
+        $('#refresh-stats').click(function() {
+            loadRatingStats();
+        });
+        
+        // 尝试初始加载统计
+        try {
+            loadRatingStats();
+        } catch (e) {
+            console.error("Error loading initial stats:", e);
+        }
+        
+        // 凭证切换功能
+        window.toggleCredentials = function() {
+            const useProfile = document.getElementById('use_profile').checked;
+            const accessKey = document.getElementById('access_key');
+            const secretKey = document.getElementById('secret_key');
+            
+            if (useProfile) {
+                accessKey.disabled = true;
+                secretKey.disabled = true;
+            } else {
+                accessKey.disabled = false;
+                secretKey.disabled = false;
+            }
+        };
+    });
+    </script>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="mb-4">AWS Bedrock Translation App</h1>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <!-- AWS Settings Panel -->
+        <div class="settings-panel mb-4">
+            <h3>AWS Settings</h3>
+            <form action="{{ url_for('connect') }}" method="post">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label for="access_key" class="form-label">Access Key</label>
+                        <input type="password" class="form-control" id="access_key" name="access_key" placeholder="Enter AWS Access Key" {% if connected %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="secret_key" class="form-label">Secret Key</label>
+                        <input type="password" class="form-control" id="secret_key" name="secret_key" placeholder="Enter AWS Secret Key" {% if connected %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="region" class="form-label">AWS Region</label>
+                        <input type="text" class="form-control" id="region" name="region" placeholder="e.g., us-east-1" value="us-east-1" {% if connected %}disabled{% endif %}>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="use_profile" name="use_profile" onchange="toggleCredentials()" {% if connected %}disabled{% endif %}>
+                            <label class="form-check-label" for="use_profile">
+                                Use default AWS profile
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary" {% if connected %}disabled{% endif %}>Connect to Bedrock</button>
+                        <span class="ms-3 {% if connected %}text-success{% else %}text-danger{% endif %}">
+                            Status: {% if connected %}Connected{% else %}Not connected{% endif %}
+                        </span>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Translation Tabs -->
+        <ul class="nav nav-tabs" id="translationTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="regular-tab" data-bs-toggle="tab" data-bs-target="#regular" type="button" role="tab" aria-controls="regular" aria-selected="true">Regular Translation</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="batch-tab" data-bs-toggle="tab" data-bs-target="#batch" type="button" role="tab" aria-controls="batch" aria-selected="false">Batch Translation</button>
+            </li>
+        </ul>
+        
+        <!-- Tab Content -->
+        <div class="tab-content" id="translationTabsContent">
+            <!-- Regular Translation -->
+            <div class="tab-pane fade show active" id="regular" role="tabpanel" aria-labelledby="regular-tab">
+                <div class="settings-panel mb-4">
+                    <h3>Translation Settings</h3>
+                    <form action="{{ url_for('translate') }}" method="post">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label for="source_language" class="form-label">Source Language</label>
+                                <select class="form-select" id="source_language" name="source_language" {% if not connected %}disabled{% endif %}>
+                                    <option value="English" {% if session.source_language == 'English' %}selected{% endif %}>English</option>
+                                    <option value="Chinese" {% if session.source_language == 'Chinese' %}selected{% endif %}>Chinese</option>
+                                    <option value="Spanish" {% if session.source_language == 'Spanish' %}selected{% endif %}>Spanish</option>
+                                    <option value="French" {% if session.source_language == 'French' %}selected{% endif %}>French</option>
+                                    <option value="German" {% if session.source_language == 'German' %}selected{% endif %}>German</option>
+                                    <option value="Japanese" {% if session.source_language == 'Japanese' %}selected{% endif %}>Japanese</option>
+                                    <option value="Korean" {% if session.source_language == 'Korean' %}selected{% endif %}>Korean</option>
+                                    <option value="Russian" {% if session.source_language == 'Russian' %}selected{% endif %}>Russian</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="target_language" class="form-label">Target Language</label>
+                                <select class="form-select" id="target_language" name="target_language" {% if not connected %}disabled{% endif %}>
+                                    <option value="English" {% if session.target_language == 'English' %}selected{% endif %}>English</option>
+                                    <option value="Chinese" {% if session.target_language == 'Chinese' or not session.target_language %}selected{% endif %}>Chinese</option>
+                                    <option value="Spanish" {% if session.target_language == 'Spanish' %}selected{% endif %}>Spanish</option>
+                                    <option value="French" {% if session.target_language == 'French' %}selected{% endif %}>French</option>
+                                    <option value="German" {% if session.target_language == 'German' %}selected{% endif %}>German</option>
+                                    <option value="Japanese" {% if session.target_language == 'Japanese' %}selected{% endif %}>Japanese</option>
+                                    <option value="Korean" {% if session.target_language == 'Korean' %}selected{% endif %}>Korean</option>
+                                    <option value="Russian" {% if session.target_language == 'Russian' %}selected{% endif %}>Russian</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="model_id" class="form-label">Translation Model</label>
+                                <select class="form-select" id="model_id" name="model_id" {% if not connected %}disabled{% endif %}>
+                                    {% if not grouped_models %}
+                                        <option value="">No models available</option>
+                                    {% else %}
+                                        {% for group_name, group_models in grouped_models.items() %}
+                                            <optgroup label="{{ group_name }}">
+                                                {% for model in group_models %}
+                                                    <option value="{{ model.id }}" {% if session.selected_model == model.id %}selected{% endif %}>{{ model.name }}</option>
+                                                {% endfor %}
+                                            </optgroup>
+                                        {% endfor %}
+                                    {% endif %}
+                                </select>
+                                <div class="form-text">Select a foundation model or inference profile</div>
+                            </div>
+                            <div class="col-12">
+                                <label for="system_prompt" class="form-label">System Prompt</label>
+                                <textarea class="form-control" id="system_prompt" name="system_prompt" rows="3" {% if not connected %}disabled{% endif %}>{% if session.system_prompt %}{{ session.system_prompt }}{% else %}You are a professional translator. Translate the text from {sourceLanguage} to {targetLanguage}. Maintain the original meaning, tone, and style as much as possible.{% endif %}</textarea>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <label for="input_text" class="form-label">Input Text</label>
+                            <textarea class="form-control" id="input_text" name="input_text" rows="5" placeholder="Enter text to translate" {% if not connected %}disabled{% endif %}></textarea>
+                            <button type="submit" class="btn btn-primary mt-3" id="translate-btn" {% if not connected %}disabled{% endif %}>Translate</button>
+                        </div>
+                    </form>
+                    
+                    <!-- Translation Result Area -->
+                    <div id="translation-result" style="display: {% if session.original_text and session.translated_text %}block{% else %}none{% endif %};">
+                        <div class="translation-container mt-4">
+                            <div class="translation-column">
+                                <h5>Original Text</h5>
+                                <div id="original-text">{% if session.original_text %}{{ session.original_text }}{% endif %}</div>
+                            </div>
+                            <div class="translation-column">
+                                <h5>Translated Text</h5>
+                                <div id="translated-text">{% if session.translated_text %}{{ session.translated_text }}{% endif %}</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Rating System -->
+                        <div class="mt-3">
+                            <h5>为翻译质量评分:</h5>
+                            <div class="star-rating">
+                                <i class="fa fa-star-o rating-star" data-rating="1" onclick="rateTranslation(1)"></i>
+                                <i class="fa fa-star-o rating-star" data-rating="2" onclick="rateTranslation(2)"></i>
+                                <i class="fa fa-star-o rating-star" data-rating="3" onclick="rateTranslation(3)"></i>
+                                <i class="fa fa-star-o rating-star" data-rating="4" onclick="rateTranslation(4)"></i>
+                                <i class="fa fa-star-o rating-star" data-rating="5" onclick="rateTranslation(5)"></i>
+                                <span id="rating-text" class="ms-2">请选择评分</span>
+                            </div>
+                            <button id="submit-rating" class="btn btn-primary mt-2" disabled onclick="submitRating()">提交评分</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Batch Translation -->
+            <div class="tab-pane fade" id="batch" role="tabpanel" aria-labelledby="batch-tab">
+                <div class="settings-panel mb-4">
+                    <h3>Batch Translation</h3>
+                    <form action="{{ url_for('translate_file') }}" method="post" enctype="multipart/form-data">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label for="source_language_batch" class="form-label">Source Language</label>
+                                <select class="form-select" id="source_language_batch" name="source_language" {% if not connected %}disabled{% endif %}>
+                                    <option value="English" {% if session.source_language == 'English' %}selected{% endif %}>English</option>
+                                    <option value="Chinese" {% if session.source_language == 'Chinese' %}selected{% endif %}>Chinese</option>
+                                    <option value="Spanish" {% if session.source_language == 'Spanish' %}selected{% endif %}>Spanish</option>
+                                    <option value="French" {% if session.source_language == 'French' %}selected{% endif %}>French</option>
+                                    <option value="German" {% if session.source_language == 'German' %}selected{% endif %}>German</option>
+                                    <option value="Japanese" {% if session.source_language == 'Japanese' %}selected{% endif %}>Japanese</option>
+                                    <option value="Korean" {% if session.source_language == 'Korean' %}selected{% endif %}>Korean</option>
+                                    <option value="Russian" {% if session.source_language == 'Russian' %}selected{% endif %}>Russian</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="target_language_batch" class="form-label">Target Language</label>
+                                <select class="form-select" id="target_language_batch" name="target_language" {% if not connected %}disabled{% endif %}>
+                                    <option value="English" {% if session.target_language == 'English' %}selected{% endif %}>English</option>
+                                    <option value="Chinese" {% if session.target_language == 'Chinese' or not session.target_language %}selected{% endif %}>Chinese</option>
+                                    <option value="Spanish" {% if session.target_language == 'Spanish' %}selected{% endif %}>Spanish</option>
+                                    <option value="French" {% if session.target_language == 'French' %}selected{% endif %}>French</option>
+                                    <option value="German" {% if session.target_language == 'German' %}selected{% endif %}>German</option>
+                                    <option value="Japanese" {% if session.target_language == 'Japanese' %}selected{% endif %}>Japanese</option>
+                                    <option value="Korean" {% if session.target_language == 'Korean' %}selected{% endif %}>Korean</option>
+                                    <option value="Russian" {% if session.target_language == 'Russian' %}selected{% endif %}>Russian</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="model_id_batch" class="form-label">Translation Model</label>
+                                <select class="form-select" id="model_id_batch" name="model_id" {% if not connected %}disabled{% endif %}>
+                                    {% if not grouped_models %}
+                                        <option value="">No models available</option>
+                                    {% else %}
+                                        {% for group_name, group_models in grouped_models.items() %}
+                                            <optgroup label="{{ group_name }}">
+                                                {% for model in group_models %}
+                                                    <option value="{{ model.id }}" {% if session.selected_model == model.id %}selected{% endif %}>{{ model.name }}</option>
+                                                {% endfor %}
+                                            </optgroup>
+                                        {% endfor %}
+                                    {% endif %}
+                                </select>
+                                <div class="form-text">Select a foundation model or inference profile</div>
+                            </div>
+                            <div class="col-12">
+                                <label for="system_prompt_batch" class="form-label">System Prompt</label>
+                                <textarea class="form-control" id="system_prompt_batch" name="system_prompt" rows="3" {% if not connected %}disabled{% endif %}>{% if session.system_prompt %}{{ session.system_prompt }}{% else %}You are a professional translator. Translate the text from {sourceLanguage} to {targetLanguage}. Maintain the original meaning, tone, and style as much as possible.{% endif %}</textarea>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <label for="file" class="form-label">Upload File (TXT, CSV, XLSX)</label>
+                            <input class="form-control" type="file" id="file" name="file" accept=".txt,.csv,.xlsx" {% if not connected %}disabled{% endif %}>
+                            <div class="form-text">Each line in the file will be treated as a separate text to translate.</div>
+                            <button type="submit" class="btn btn-primary mt-3" id="translate-file-btn" {% if not connected %}disabled{% endif %}>Translate File</button>
+                            
+                            <!-- Progress Bar for Batch Translation -->
+                            <div id="progress-container" style="display: none;">
+                                <div class="progress mt-3">
+                                    <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0%;" 
+                                         aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                </div>
+                                <p id="progress-text" class="mt-2">处理中: 0/0 项</p>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rating Statistics Section -->
+    <div class="container mt-5">
+        <h3>翻译评分统计</h3>
+        <div class="row">
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="stats-granularity">时间粒度:</label>
+                    <select id="stats-granularity" class="form-select">
+                        <option value="day">按天</option>
+                        <option value="hour">按小时</option>
+                    </select>
+                </div>
+                <button id="refresh-stats" class="btn btn-secondary mt-2">刷新统计</button>
+            </div>
+        </div>
+        
+        <div class="row mt-3">
+            <div class="col-md-6">
+                <h4>评分趋势</h4>
+                <canvas id="rating-trend-chart"></canvas>
+            </div>
+            <div class="col-md-6">
+                <h4>评分分布</h4>
+                <canvas id="rating-distribution-chart"></canvas>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <h4>语言对评分</h4>
+                <canvas id="language-pair-chart"></canvas>
+            </div>
+            <div class="col-md-6">
+                <h4>模型评分</h4>
+                <canvas id="model-chart"></canvas>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <h4>洞察分析</h4>
+                <div id="insights-container" class="p-3 bg-light"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 等待文档完全加载
+        $(document).ready(function() {
+            console.log("文档已加载，准备绑定事件");
+            
+            // 直接绑定点击事件到星星元素
+            $(".rating-star").on("click", function() {
+                console.log("星星被点击");
+                var rating = $(this).data("rating");
+                console.log("评分: " + rating);
+                
+                // 更新星星显示
+                $(".rating-star").removeClass("fa-star").addClass("fa-star-o");
+                for (var i = 1; i <= rating; i++) {
+                    $(".rating-star[data-rating='" + i + "']").removeClass("fa-star-o").addClass("fa-star");
+                }
+                
+                // 更新文本和启用提交按钮
+                $("#rating-text").text(rating + "/5 星");
+                $("#submit-rating").prop("disabled", false).data("rating", rating);
+            });
+            
+            // 绑定提交按钮点击事件
+            $("#submit-rating").on("click", function() {
+                console.log("提交按钮被点击");
+                var rating = $(this).data("rating");
+                
+                // 获取翻译数据
+                var sourceText = $("#original-text").text();
+                var translatedText = $("#translated-text").text();
+                var sourceLanguage = $("#source_language").val();
+                var targetLanguage = $("#target_language").val();
+                var modelId = $("#model_id").val();
+                
+                // 准备评分数据
+                var ratingData = {
+                    source_text: sourceText,
+                    translated_text: translatedText,
+                    source_language: sourceLanguage,
+                    target_language: targetLanguage,
+                    model_id: modelId,
+                    rating: rating
+                };
+                
+                // 提交评分
+                $.ajax({
+                    url: "/submit_rating",
+                    type: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify(ratingData),
+                    success: function(response) {
+                        alert("评分提交成功，谢谢您的反馈！");
+                        
+                        // 重置评分界面
+                        $(".rating-star").removeClass("fa-star").addClass("fa-star-o");
+                        $("#rating-text").text("请选择评分");
+                        $("#submit-rating").prop("disabled", true);
+                        
+                        // 刷新统计
+                        loadRatingStats();
+                    },
+                    error: function(xhr) {
+                        alert("评分提交失败: " + (xhr.responseJSON ? xhr.responseJSON.error : "未知错误"));
+                    }
+                });
+            });
+            
+            function toggleCredentials() {
+                const useProfile = document.getElementById('use_profile').checked;
+                const accessKey = document.getElementById('access_key');
+                const secretKey = document.getElementById('secret_key');
+                
+                if (useProfile) {
+                    accessKey.disabled = true;
+                    secretKey.disabled = true;
+                } else {
+                    accessKey.disabled = false;
+                    secretKey.disabled = false;
+                }
+            }
+            
+            // 加载评分统计
+            function loadRatingStats() {
+                const granularity = $('#stats-granularity').val();
+                
+                $.ajax({
+                    url: `/rating_stats?granularity=${granularity}`,
+                    type: 'GET',
+                    success: function(data) {
+                        // Render charts
+                        renderTrendChart(data.time_series, granularity);
+                        renderDistributionChart(data.rating_distribution);
+                        renderLanguagePairChart(data.language_pairs);
+                        renderModelChart(data.models);
+                        
+                        // Show insights
+                        renderInsights(data.insights);
+                    },
+                    error: function(xhr) {
+                        console.error('Failed to load rating stats:', xhr);
+                    }
+                });
+            }
+            
+            // 刷新统计按钮
+            $('#refresh-stats').click(function() {
+                loadRatingStats();
+            });
+            
+            // 尝试初始加载统计
+            try {
+                loadRatingStats();
+            } catch (e) {
+                console.error("Error loading initial stats:", e);
+            }
+            console.log("初始化星星评分系统");
+            
+            // 直接绑定点击事件到每个星星
+            $('.rating-star').on('click', function() {
+                const rating = $(this).data('rating');
+                console.log("星星点击事件触发，评分：", rating);
+                
+                // Update stars display
+                $('.rating-star').removeClass('fa-star').addClass('fa-star-o');
+                for (let i = 1; i <= rating; i++) {
+                    $(`.rating-star[data-rating="${i}"]`).removeClass('fa-star-o').addClass('fa-star');
+                }
+                
+                // Update rating text
+                $('#rating-text').text(`${rating}/5 星`);
+                
+                // Enable submit button
+                $('#submit-rating').prop('disabled', false).data('rating', rating);
+            });
+            
+            // 绑定提交按钮点击事件
+            $('#submit-rating').on('click', function() {
+                const rating = $(this).data('rating');
+                console.log("提交评分按钮点击，评分：", rating);
+                
+                // Get current translation data
+                const sourceText = $('#original-text').text();
+                const translatedText = $('#translated-text').text();
+                const sourceLanguage = $('#source_language').val();
+                const targetLanguage = $('#target_language').val();
+                const modelId = $('#model_id').val();
+                
+                // Prepare rating data
+                const ratingData = {
+                    source_text: sourceText,
+                    translated_text: translatedText,
+                    source_language: sourceLanguage,
+                    target_language: targetLanguage,
+                    model_id: modelId,
+                    rating: rating
+                };
+                
+                // Submit rating via AJAX
+                $.ajax({
+                    url: '/submit_rating',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(ratingData),
+                    success: function(response) {
+                        // Show success message
+                        alert('评分提交成功，谢谢您的反馈！');
+                        
+                        // Reset rating UI
+                        $('.rating-star').removeClass('fa-star').addClass('fa-star-o');
+                        $('#rating-text').text('请选择评分');
+                        $('#submit-rating').prop('disabled', true);
+                        
+                        // Refresh stats
+                        loadRatingStats();
+                    },
+                    error: function(xhr) {
+                        alert('评分提交失败: ' + (xhr.responseJSON ? xhr.responseJSON.error : '未知错误'));
+                    }
+                });
+            });
+        }
+        
+        $(document).ready(function() {
+            // 初始化星星评分系统
+            handleStarRating();
+            
+            // Load initial stats
+            loadRatingStats();
+            
+            // Modify translation form to use AJAX
+            $('#translation-form').submit(function(e) {
+                e.preventDefault();
+                
+                // Get form data
+                const formData = new FormData(this);
+                
+                // Show loading indicator
+                $('#translate-btn').prop('disabled', true).text('翻译中...');
+                
+                // Send AJAX request
+                $.ajax({
+                    url: '/api/translate',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        // Display translation result
+                        $('#original-text').text(response.original_text);
+                        $('#translated-text').text(response.translated_text);
+                        $('#translation-result').show();
+                        
+                        // Reset rating UI
+                        $('.rating-star').removeClass('fa-star').addClass('fa-star-o');
+                        $('#rating-text').text('请选择评分');
+                        $('#submit-rating').prop('disabled', true);
+                        
+                        // Reset button state
+                        $('#translate-btn').prop('disabled', false).text('Translate');
+                    },
+                    error: function(xhr) {
+                        alert('翻译失败: ' + (xhr.responseJSON ? xhr.responseJSON.error : '未知错误'));
+                        $('#translate-btn').prop('disabled', false).text('Translate');
+                    }
+                });
+            });
+            
+            // File translation form - add progress tracking
+            $('form[action="/translate_file"]').submit(function(e) {
+                // Only if file is selected
+                if (!$('#file').val()) {
+                    alert('请选择要翻译的文件');
+                    e.preventDefault();
+                    return false;
+                }
+                
+                // Show progress bar
+                $('#progress-container').show();
+                $('#translate-file-btn').prop('disabled', true).text('翻译中...');
+                
+                // We'll let the form submit normally as it returns a file download
+                // But we'll start polling for progress
+                setTimeout(startProgressPolling, 500);
+                return true;
+            });
+            
+            // Progress polling function
+            function startProgressPolling() {
+                let progressInterval = setInterval(function() {
+                    $.ajax({
+                        url: "/progress",
+                        type: "GET",
+                        success: function(data) {
+                            // Update progress bar
+                            let percent = data.percent;
+                            $("#progress-bar").css("width", percent + "%").attr("aria-valuenow", percent).text(percent + "%");
+                            $("#progress-text").text(`处理中: ${data.completed}/${data.total} 项`);
+                            
+                            // If complete, stop polling
+                            if (data.completed >= data.total && data.total > 0) {
+                                clearInterval(progressInterval);
+                                $("#translate-file-btn").prop('disabled', false).text("Translate File");
+                                
+                                // Hide progress bar after a delay
+                                setTimeout(function() {
+                                    $("#progress-container").hide();
+                                }, 3000);
+                            }
+                        },
+                        error: function() {
+                            console.error("Error fetching progress");
+                        }
+                    });
+                }, 500); // Check every 500ms
+            }
+            
+            // Render trend chart
+            function renderTrendChart(timeSeriesData, granularity) {
+                const ctx = document.getElementById('rating-trend-chart').getContext('2d');
+                
+                // Destroy existing chart
+                if (window.trendChart) {
+                    window.trendChart.destroy();
+                }
+                
+                // Prepare data
+                const labels = timeSeriesData.map(item => item.time_period);
+                const ratings = timeSeriesData.map(item => item.avg_rating);
+                const counts = timeSeriesData.map(item => item.count);
+                
+                // Create chart
+                window.trendChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: '平均评分',
+                                data: ratings,
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                                yAxisID: 'y',
+                                tension: 0.1
+                            },
+                            {
+                                label: '评分数量',
+                                data: counts,
+                                borderColor: 'rgba(153, 102, 255, 1)',
+                                backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                                yAxisID: 'y1',
+                                type: 'bar'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                min: 0,
+                                max: 5,
+                                title: {
+                                    display: true,
+                                    text: '平均评分'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                min: 0,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: granularity === 'hour' ? '按小时评分趋势' : '按天评分趋势'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Render distribution chart
+            function renderDistributionChart(distributionData) {
+                const ctx = document.getElementById('rating-distribution-chart').getContext('2d');
+                
+                // Destroy existing chart
+                if (window.distributionChart) {
+                    window.distributionChart.destroy();
+                }
+                
+                // Prepare data
+                const ratings = [];
+                const counts = [];
+                
+                // Ensure all ratings have data
+                for (let i = 1; i <= 5; i++) {
+                    const found = distributionData.find(item => item.rating === i);
+                    ratings.push(i + ' 星');
+                    counts.push(found ? found.count : 0);
+                }
+                
+                // Create chart
+                window.distributionChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ratings,
+                        datasets: [{
+                            label: '评分数量',
+                            data: counts,
+                            backgroundColor: [
+                                'rgba(255, 99, 132, 0.5)',
+                                'rgba(255, 159, 64, 0.5)',
+                                'rgba(255, 205, 86, 0.5)',
+                                'rgba(75, 192, 192, 0.5)',
+                                'rgba(54, 162, 235, 0.5)'
+                            ],
+                            borderColor: [
+                                'rgb(255, 99, 132)',
+                                'rgb(255, 159, 64)',
+                                'rgb(255, 205, 86)',
+                                'rgb(75, 192, 192)',
+                                'rgb(54, 162, 235)'
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '评分分布'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Render language pair chart
+            function renderLanguagePairChart(languagePairData) {
+                const ctx = document.getElementById('language-pair-chart').getContext('2d');
+                
+                // Destroy existing chart
+                if (window.languagePairChart) {
+                    window.languagePairChart.destroy();
+                }
+                
+                // Limit displayed pairs
+                const topPairs = languagePairData.slice(0, 10);
+                
+                // Prepare data
+                const labels = topPairs.map(item => item.language_pair);
+                const ratings = topPairs.map(item => item.avg_rating);
+                const counts = topPairs.map(item => item.count);
+                
+                // Create chart
+                window.languagePairChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: '平均评分',
+                                data: ratings,
+                                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: '评分数量',
+                                data: counts,
+                                backgroundColor: 'rgba(153, 102, 255, 0.5)',
+                                borderColor: 'rgba(153, 102, 255, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y1',
+                                type: 'line'
+                            }
+                        ]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        scales: {
+                            x: {
+                                min: 0,
+                                max: 5,
+                                title: {
+                                    display: true,
+                                    text: '平均评分'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                position: 'right',
+                                min: 0,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '语言对评分'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Render model chart
+            function renderModelChart(modelData) {
+                const ctx = document.getElementById('model-chart').getContext('2d');
+                
+                // Destroy existing chart
+                if (window.modelChart) {
+                    window.modelChart.destroy();
+                }
+                
+                // Prepare data
+                const labels = modelData.map(item => item.model_id);
+                const ratings = modelData.map(item => item.avg_rating);
+                const counts = modelData.map(item => item.count);
+                
+                // Create chart
+                window.modelChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: '平均评分',
+                                data: ratings,
+                                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: '评分数量',
+                                data: counts,
+                                backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y1',
+                                type: 'line'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                min: 0,
+                                max: 5,
+                                title: {
+                                    display: true,
+                                    text: '平均评分'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                min: 0,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '模型评分'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Render insights
+            function renderInsights(insights) {
+                const container = $('#insights-container');
+                container.empty();
+                
+                if (insights && insights.length > 0) {
+                    const list = $('<ul class="insights-list"></ul>');
+                    insights.forEach(insight => {
+                        list.append(`<li>${insight}</li>`);
+                    });
+                    container.append(list);
+                } else {
+                    container.append('<p>暂无足够数据生成洞察分析</p>');
+                }
+            }
+        });
+    </script>
+    
+    <!-- 统计功能的JavaScript -->
+    <script>
+        $(document).ready(function() {
+            // 初始化统计图表
+            loadRatingStats();
+            
+            // 刷新统计按钮
+            $('#refresh-stats').click(function() {
+                loadRatingStats();
+            });
+            
+            // 时间粒度选择变化时自动刷新
+            $('#stats-granularity').change(function() {
+                loadRatingStats();
+            });
+            
+            // 加载评分统计数据
+            function loadRatingStats() {
+                const granularity = $('#stats-granularity').val();
+                console.log("Loading rating stats with granularity:", granularity);
+                
+                $.ajax({
+                    url: `/rating_stats?granularity=${granularity}`,
+                    type: 'GET',
+                    success: function(data) {
+                        console.log("Rating stats loaded successfully:", data);
+                        
+                        // 渲染图表
+                        renderTrendChart(data.time_series, granularity);
+                        renderDistributionChart(data.rating_distribution);
+                        renderLanguagePairChart(data.language_pairs);
+                        renderModelChart(data.models);
+                        
+                        // 显示洞察
+                        renderInsights(data.insights);
+                    },
+                    error: function(xhr) {
+                        console.error('Failed to load rating stats:', xhr);
+                        $('#insights-container').html('<div class="alert alert-danger">加载统计数据失败，请查看控制台获取详细错误信息</div>');
+                    }
+                });
+            }
+            
+            // 渲染趋势图表
+            function renderTrendChart(timeSeriesData, granularity) {
+                const ctx = document.getElementById('rating-trend-chart').getContext('2d');
+                
+                // 销毁现有图表
+                if (window.trendChart) {
+                    window.trendChart.destroy();
+                }
+                
+                // 如果没有数据，显示提示信息
+                if (!timeSeriesData || timeSeriesData.length === 0) {
+                    $(ctx.canvas).parent().html('<div class="alert alert-info">暂无评分趋势数据</div>');
+                    return;
+                }
+                
+                // 准备数据
+                const labels = timeSeriesData.map(item => item.time_period);
+                const ratings = timeSeriesData.map(item => parseFloat(item.avg_rating));
+                const counts = timeSeriesData.map(item => parseInt(item.count));
+                
+                // 创建图表
+                window.trendChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: '平均评分',
+                                data: ratings,
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                                yAxisID: 'y',
+                                tension: 0.1
+                            },
+                            {
+                                label: '评分数量',
+                                data: counts,
+                                borderColor: 'rgba(153, 102, 255, 1)',
+                                backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                                yAxisID: 'y1',
+                                type: 'bar'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                min: 0,
+                                max: 5,
+                                title: {
+                                    display: true,
+                                    text: '平均评分'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                min: 0,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: granularity === 'hour' ? '按小时评分趋势' : '按天评分趋势'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 渲染分布图表
+            function renderDistributionChart(distributionData) {
+                const ctx = document.getElementById('rating-distribution-chart').getContext('2d');
+                
+                // 销毁现有图表
+                if (window.distributionChart) {
+                    window.distributionChart.destroy();
+                }
+                
+                // 如果没有数据，显示提示信息
+                if (!distributionData || distributionData.length === 0) {
+                    $(ctx.canvas).parent().html('<div class="alert alert-info">暂无评分分布数据</div>');
+                    return;
+                }
+                
+                // 准备数据
+                const ratings = [];
+                const counts = [];
+                
+                // 确保所有评分都有数据
+                for (let i = 1; i <= 5; i++) {
+                    const found = distributionData.find(item => parseInt(item.rating) === i);
+                    ratings.push(i + ' 星');
+                    counts.push(found ? parseInt(found.count) : 0);
+                }
+                
+                // 创建图表
+                window.distributionChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ratings,
+                        datasets: [{
+                            label: '评分数量',
+                            data: counts,
+                            backgroundColor: [
+                                'rgba(255, 99, 132, 0.5)',
+                                'rgba(255, 159, 64, 0.5)',
+                                'rgba(255, 205, 86, 0.5)',
+                                'rgba(75, 192, 192, 0.5)',
+                                'rgba(54, 162, 235, 0.5)'
+                            ],
+                            borderColor: [
+                                'rgb(255, 99, 132)',
+                                'rgb(255, 159, 64)',
+                                'rgb(255, 205, 86)',
+                                'rgb(75, 192, 192)',
+                                'rgb(54, 162, 235)'
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '评分分布'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 渲染语言对图表
+            function renderLanguagePairChart(languagePairData) {
+                const ctx = document.getElementById('language-pair-chart').getContext('2d');
+                
+                // 销毁现有图表
+                if (window.languagePairChart) {
+                    window.languagePairChart.destroy();
+                }
+                
+                // 如果没有数据，显示提示信息
+                if (!languagePairData || languagePairData.length === 0) {
+                    $(ctx.canvas).parent().html('<div class="alert alert-info">暂无语言对评分数据</div>');
+                    return;
+                }
+                
+                // 限制显示的语言对
+                const topPairs = languagePairData.slice(0, 10);
+                
+                // 准备数据
+                const labels = topPairs.map(item => item.language_pair);
+                const ratings = topPairs.map(item => parseFloat(item.avg_rating));
+                const counts = topPairs.map(item => parseInt(item.count));
+                
+                // 创建图表
+                window.languagePairChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: '平均评分',
+                                data: ratings,
+                                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: '评分数量',
+                                data: counts,
+                                backgroundColor: 'rgba(153, 102, 255, 0.5)',
+                                borderColor: 'rgba(153, 102, 255, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y1',
+                                type: 'line'
+                            }
+                        ]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        scales: {
+                            x: {
+                                min: 0,
+                                max: 5,
+                                title: {
+                                    display: true,
+                                    text: '平均评分'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                position: 'right',
+                                min: 0,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '语言对评分'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 渲染模型图表
+            function renderModelChart(modelData) {
+                const ctx = document.getElementById('model-chart').getContext('2d');
+                
+                // 销毁现有图表
+                if (window.modelChart) {
+                    window.modelChart.destroy();
+                }
+                
+                // 如果没有数据，显示提示信息
+                if (!modelData || modelData.length === 0) {
+                    $(ctx.canvas).parent().html('<div class="alert alert-info">暂无模型评分数据</div>');
+                    return;
+                }
+                
+                // 准备数据
+                const labels = modelData.map(item => item.model_id);
+                const ratings = modelData.map(item => parseFloat(item.avg_rating));
+                const counts = modelData.map(item => parseInt(item.count));
+                
+                // 创建图表
+                window.modelChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: '平均评分',
+                                data: ratings,
+                                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: '评分数量',
+                                data: counts,
+                                backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y1',
+                                type: 'line'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                min: 0,
+                                max: 5,
+                                title: {
+                                    display: true,
+                                    text: '平均评分'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                min: 0,
+                                title: {
+                                    display: true,
+                                    text: '评分数量'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '模型评分'
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 渲染洞察
+            function renderInsights(insights) {
+                const container = $('#insights-container');
+                container.empty();
+                
+                if (insights && insights.length > 0) {
+                    const list = $('<ul class="insights-list"></ul>');
+                    insights.forEach(insight => {
+                        list.append(`<li>${insight}</li>`);
+                    });
+                    container.append(list);
+                } else {
+                    container.append('<p>暂无足够数据生成洞察分析</p>');
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+    <script>
+    // 全局变量，存储当前评分
+    var currentRating = 0;
+    
+    // 评分函数
+    function rateTranslation(rating) {
+        console.log("评分函数被调用，评分：" + rating);
+        currentRating = rating;
+        
+        // 更新星星显示
+        var stars = document.getElementsByClassName("rating-star");
+        for (var i = 0; i < stars.length; i++) {
+            if (i < rating) {
+                stars[i].classList.remove("fa-star-o");
+                stars[i].classList.add("fa-star");
+            } else {
+                stars[i].classList.remove("fa-star");
+                stars[i].classList.add("fa-star-o");
+            }
+        }
+        
+        // 更新文本和启用提交按钮
+        document.getElementById("rating-text").textContent = rating + "/5 星";
+        document.getElementById("submit-rating").disabled = false;
+    }
+    
+    // 提交评分函数
+    function submitRating() {
+        console.log("提交评分函数被调用，评分：" + currentRating);
+        
+        // 获取翻译数据
+        var sourceText = document.getElementById("original-text").textContent;
+        var translatedText = document.getElementById("translated-text").textContent;
+        var sourceLanguage = document.getElementById("source_language").value;
+        var targetLanguage = document.getElementById("target_language").value;
+        var modelId = document.getElementById("model_id").value;
+        
+        // 准备评分数据
+        var ratingData = {
+            source_text: sourceText,
+            translated_text: translatedText,
+            source_language: sourceLanguage,
+            target_language: targetLanguage,
+            model_id: modelId,
+            rating: currentRating
+        };
+        
+        // 使用原生JavaScript发送AJAX请求
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/submit_rating", true);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200) {
+                    alert("评分提交成功，谢谢您的反馈！");
+                    
+                    // 重置评分界面
+                    var stars = document.getElementsByClassName("rating-star");
+                    for (var i = 0; i < stars.length; i++) {
+                        stars[i].classList.remove("fa-star");
+                        stars[i].classList.add("fa-star-o");
+                    }
+                    document.getElementById("rating-text").textContent = "请选择评分";
+                    document.getElementById("submit-rating").disabled = true;
+                    currentRating = 0;
+                    
+                    // 如果存在loadRatingStats函数，刷新统计
+                    if (typeof loadRatingStats === 'function') {
+                        loadRatingStats();
+                    }
+                } else {
+                    alert("评分提交失败: " + xhr.responseText);
+                }
+            }
+        };
+        xhr.send(JSON.stringify(ratingData));
+    }
+    
+    // 凭证切换函数
+    function toggleCredentials() {
+        var useProfile = document.getElementById('use_profile').checked;
+        var accessKey = document.getElementById('access_key');
+        var secretKey = document.getElementById('secret_key');
+        
+        if (useProfile) {
+            accessKey.disabled = true;
+            secretKey.disabled = true;
+        } else {
+            accessKey.disabled = false;
+            secretKey.disabled = false;
+        }
+    }
+    </script>
