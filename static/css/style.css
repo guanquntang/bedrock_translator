@@ -1,0 +1,68 @@
+/* AWS Bedrock Translation App Styles */
+
+.translation-container {
+    display: flex;
+    margin-top: 20px;
+}
+
+.translation-column {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ddd;
+    margin: 0 5px;
+}
+
+.settings-panel {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+.tab-content {
+    padding-top: 20px;
+}
+
+.star-rating {
+    font-size: 24px;
+    color: #ffc107;
+    cursor: pointer;
+}
+
+.fa-star, .fa-star-o {
+    margin-right: 5px;
+}
+
+.insights-list {
+    padding-left: 20px;
+}
+
+.insights-list li {
+    margin-bottom: 8px;
+}
+
+#progress-container {
+    margin-top: 20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .translation-container {
+        flex-direction: column;
+    }
+    
+    .translation-column {
+        margin: 5px 0;
+    }
+}
+
+/* Animation for loading */
+.loading {
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
