@@ -1,16 +1,17 @@
-# AWS Bedrock Translation Application
+# AWS Bedrock Translation Application V 0.2
 
 A powerful translation web application based on AWS Bedrock, supporting text translation and batch file translation with a translation quality rating system.
 
 ![AWS Bedrock Translation](https://img.shields.io/badge/AWS-Bedrock-orange)
 ![Python](https://img.shields.io/badge/Python-3.8+-blue)
 ![Flask](https://img.shields.io/badge/Flask-2.0+-green)
+![Version](https://img.shields.io/badge/Version-0.2-brightgreen)
 
 ## Features
 
 - 🌐 Translation between multiple languages
 - 📊 Translation quality rating system (1-5 stars)
-- 📁 Batch translation of TXT, CSV, and XLSX files
+- 📁 Batch translation of TXT, CSV, and XLSX files with real-time progress tracking
 - 🤖 Support for various AWS Bedrock models, including Claude 3 series
 - ⚙️ Support for AWS Bedrock inference profiles
 - 📈 Detailed translation quality statistics and analysis
@@ -72,8 +73,10 @@ The startup script supports the following parameters:
 
 2. **Translation Module**
    - Supports single text translation
-   - Supports batch file translation
+   - Supports batch file translation with real-time progress tracking
    - Uses AWS Bedrock API for high-quality translation
+   - Enhanced support for various model types (Claude, Nova, DeepSeek, Mistral)
+   - Robust error handling and fallback mechanisms
 
 3. **Rating System**
    - Allows users to rate translation quality (1-5 stars)
@@ -113,7 +116,8 @@ The startup script supports the following parameters:
 4. Upload a TXT, CSV, or XLSX file
    - Each line in the file will be treated as a separate text to translate
 5. Click "Translate File"
-6. The translated file will be automatically downloaded as an HTML file with original and translated text side by side
+6. Monitor the translation progress in real-time with the progress bar
+7. The translated file will be automatically downloaded as an HTML file with original and translated text side by side
 
 ## Customizing the System Prompt
 
@@ -144,6 +148,22 @@ Before using this application, you need to update the `model_config.py` file wit
 1. Replace `YOUR_ACCOUNT_ID` in all inference profile ARNs with your actual AWS account ID
 2. Verify that the models and inference profiles listed are available in your AWS account
 3. Add or remove models based on what's available to you
+
+## Changelog
+
+### Version 0.2
+- Added real-time progress tracking for batch translation
+- Enhanced support for various model types (Claude 3.5/3.7, Nova, DeepSeek, Mistral)
+- Improved error handling and fallback mechanisms for inference profiles
+- Added version number display
+- Fixed indentation issues in model configuration
+- Added delay between API calls to prevent rate limiting
+
+### Version 0.1
+- Initial release with basic translation functionality
+- Support for regular and batch translation
+- Rating system implementation
+- Statistical analysis features
 
 ## Contributing
 

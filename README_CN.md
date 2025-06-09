@@ -1,16 +1,17 @@
-# AWS Bedrock 翻译应用
+# AWS Bedrock 翻译应用 V 0.2
 
 一个基于AWS Bedrock的强大翻译Web应用，支持文本翻译和批量文件翻译，并提供翻译质量评分系统。
 
 ![AWS Bedrock Translation](https://img.shields.io/badge/AWS-Bedrock-orange)
 ![Python](https://img.shields.io/badge/Python-3.8+-blue)
 ![Flask](https://img.shields.io/badge/Flask-2.0+-green)
+![Version](https://img.shields.io/badge/Version-0.2-brightgreen)
 
 ## 功能特点
 
 - 🌐 支持多种语言之间的翻译
 - 📊 翻译质量评分系统（1-5星）
-- 📁 批量翻译TXT、CSV和XLSX文件
+- 📁 批量翻译TXT、CSV和XLSX文件，支持实时进度跟踪
 - 🤖 支持多种AWS Bedrock模型，包括Claude 3系列
 - ⚙️ 支持AWS Bedrock推理配置文件
 - 📈 详细的翻译质量统计和分析
@@ -72,8 +73,10 @@
 
 2. **翻译模块**
    - 支持单文本翻译
-   - 支持批量文件翻译
+   - 支持批量文件翻译，带有实时进度跟踪
    - 使用AWS Bedrock API进行高质量翻译
+   - 增强对各种模型类型的支持（Claude、Nova、DeepSeek、Mistral）
+   - 健壮的错误处理和回退机制
 
 3. **评分系统**
    - 允许用户对翻译质量进行评分（1-5星）
@@ -113,7 +116,8 @@
 4. 上传TXT、CSV或XLSX文件
    - 文件中的每一行将被视为单独的文本进行翻译
 5. 点击"翻译文件"
-6. 翻译后的文件将自动下载为HTML文件，其中包含原文和译文
+6. 通过进度条实时监控翻译进度
+7. 翻译后的文件将自动下载为HTML文件，其中包含原文和译文
 
 ## 自定义系统提示词
 
@@ -144,6 +148,22 @@
 1. 将所有推理配置文件ARN中的`YOUR_ACCOUNT_ID`替换为您实际的AWS账户ID
 2. 验证列出的模型和推理配置文件在您的AWS账户中可用
 3. 根据您可用的模型添加或删除模型
+
+## 更新日志
+
+### 版本 0.2
+- 为批量翻译添加了实时进度跟踪
+- 增强了对各种模型类型的支持（Claude 3.5/3.7、Nova、DeepSeek、Mistral）
+- 改进了推理配置文件的错误处理和回退机制
+- 添加了版本号显示
+- 修复了模型配置中的缩进问题
+- 在API调用之间添加了延迟，以防止速率限制
+
+### 版本 0.1
+- 初始版本，具有基本翻译功能
+- 支持常规和批量翻译
+- 评分系统实现
+- 统计分析功能
 
 ## 贡献
 
